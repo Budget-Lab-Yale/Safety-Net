@@ -2,15 +2,16 @@
 # medicaid_snap_fy2025.R
 # 
 # Distributional analysis of changes in Medicaid and
-# SNAP spending in FY2025 House Budget Resolution
+# SNAP spending in FY2025 House Budget Resolution for
+# CY2026.
 #---------------------------------------------------
 
+#--------------------------
+# Set simulation parameters
+#--------------------------
+
+# Set working directory
 setwd('~/project/repositories/Safety-Net')
-
-
-#----------------
-# Set parameters
-#----------------
 
 # Load required packages
 lapply(readLines('requirements.txt'), library, character.only = T)
@@ -19,7 +20,7 @@ lapply(readLines('requirements.txt'), library, character.only = T)
 data_vintage <- '2025031013'
 
 # Set filepaths
-#a. Core data
+#a. CPS ASEC data
 cps_path <- paste0('/gpfs/gibbs/project/sarin/shared/raw_data/CPS-ASEC/v1/', data_vintage,'/historical/')
 #b. Historical/projected economic variables
 macro_proj_path <- '/gpfs/gibbs/project/sarin/shared/model_data/Macro-Projections/v3/2024121811/baseline/'
@@ -36,6 +37,43 @@ for (x in c(cps_path)) {
 
 # Set random seed 
 set.seed(85675443)
+
+
+#--------------------------
+# Set policy parameters
+#--------------------------
+# Sources:
+# House Budget Resolution: https://docs.house.gov/meetings/BU/BU00/20250213/117894/BILLS-119HConRes14ih.pdf
+# January 2025 BEO: https://www.cbo.gov/system/files/2025-01/51118-2025-01-Budget-Projections.xlsx
+# June 2024 Medicaid: https://www.cbo.gov/system/files/2024-06/51301-2024-06-medicaid.xlsx
+# June 2024 CHIP: https://www.cbo.gov/system/files/2024-06/51296-2024-06-chip.xlsx
+# January 2025 SNAP: https://www.cbo.gov/system/files/2025-01/51312-2025-01-snap.xlsx
+
+# Calculate percent cuts to SNAP and Medicaid based on:
+# a. Reconciliation instructions to committees in House BR (multiplied by 4/3 to account for
+#    additional $500B in unspecified decifit reduction on top of $1.5T of specified cuts).
+# b. CBO January 2025 BEO figures (totals) for SNAP and Medicaid for FY2025-34
+snap_cut <- (230 * (4/3)) / 1117.344
+medicaid_cut <- (880 * (4/3)) / 8410.476
+
+# Average per-person Federal spending on Medicaid + CHIP, CY2026
+# Using June 2024 detailed baseline projections (latest available), taking weighted
+# average of FY2026 and FY2027.
+# For children, combining Medicaid and CHIP. For non-disabled adults, combining 
+# ACA expansion and non-expansion populations.
+avg_medicaid_elderly <- (0.75*16630 + 0.25*16720)
+avg_medicaid_child <- 0.75*((31/38) * 2280 + (7/38) * 2778) + 0.25*((31/38) * 2360 + (7/38) * 2840)
+avg_medicaid_nondisab_adult <- 0.75*((18/32) * 3750 + (14/32) * 8110) + 0.25*((18/32) * 3870 + (14/32) * 8400)
+avg_medicaid_disab_adult <- (0.75*21210 + 0.25*21520)
+
+# Total SNAP and Medicaid/CHIP benefits, CY2026
+# For SNAP, using January 2025 baseline projections.
+total_snap_ben <- 0.75*96816+0.25*99514
+# For Medicaid/CHIP, using June 2024 (latest available), excluding long-term
+# institutional care (since CPS ASEC sample frame excludes institutionalized 
+# individuals).
+total_medicaid_ben <-  1000 * (0.75*(578 - 63 + 20) + 0.25*(604 - 65 + 20))
+
 
 #-------------------------------
 # Read in Budget Lab functions
@@ -155,19 +193,18 @@ asec_data <- asec_data %>%
   left_join(snap_data, by = c("serial", "famunit"))
 
 # b. Medicaid
-# Compute each Medicaid recipient's 2026 spending level using CBO baseline projections (June 2024 vintage)
+# Assign each Medicaid recipient's 2026 spending level
 asec_data <- asec_data %>%
   mutate(
-    child = ifelse(himcaidly == 2 & age >= 0 & age <= 18, 1, 0),
-    elderly = ifelse(himcaidly == 2 & age >= 65 & age <= 100, 1, 0),
-    disab_adult = ifelse(himcaidly == 2 & age >= 19 & age <= 64 & disabwrk == 2, 1, 0),
-    nondisab_adult = ifelse(himcaidly == 2 & age >= 19 & age <= 64 & disabwrk == 1, 1, 0),
-    
     medicaid_spending_2026 = case_when(
-      elderly == 1 ~ (0.75*16630 + 0.25*16720),
-      child == 1 ~ 0.75*((31/38) * 2280 + (7/38) * 2778) + 0.25*((31/38) * 2360 + (7/38) * 2840),
-      nondisab_adult == 1 ~ 0.75*((18/32) * 3750 + (14/32) * 8110) + 0.25*((18/32) * 3870 + (14/32) * 8400),
-      disab_adult == 1 ~ (0.75*21210 + 0.25*21520),
+      # Child
+      himcaidly == 2 & (age >= 0 & age <= 18) ~ avg_medicaid_child,
+      # Elderly
+      himcaidly == 2 & age >= 65 ~ avg_medicaid_elderly,
+      # Disabled adult
+      himcaidly == 2 & (age >= 19 & age <= 64) & disabwrk == 2 ~ avg_medicaid_disab_adult,
+      # Nondisabled adult
+      himcaidly == 2 & (age >= 19 & age <= 64) & disabwrk == 1 ~ avg_medicaid_nondisab_adult,
       TRUE ~ 0
     )
   )
@@ -186,7 +223,6 @@ tax_unit_data <- asec_data %>%
 #--------------------------------------
 # AGI percentile cutoff construction
 #--------------------------------------
-
 # Generate small random noise to break ties
 tax_unit_data <- tax_unit_data %>%
   mutate(agi_2023_noise = agi_2023 + runif(n()) * (agi_2023 >= 0))
@@ -230,8 +266,8 @@ tax_unit_data <- tax_unit_data %>% mutate(
 #b. Adjustment 2: scale up all transfer spending to CBO 2026 projection to account for undercount in ASEC and/or
 #                 for changes in program spending between year of data and 2026
 # Calculate adjustment factors for undercount
-snap_adj <- (0.75*96816+0.25*99514) / (sum(tax_unit_data$snap_spending_2023 * tax_unit_data$tax_unit_wt_2026)/1000000)
-medicaid_adj <- 1000 * (0.75*(578 - 63 + 20) + 0.25*(604 - 65 + 20)) / (sum(tax_unit_data$medicaid_spending_2026 * tax_unit_data$tax_unit_wt_2026)/1000000)
+snap_adj <- total_snap_ben / (sum(tax_unit_data$snap_spending_2023 * tax_unit_data$tax_unit_wt_2026)/1000000)
+medicaid_adj <- total_medicaid_ben / (sum(tax_unit_data$medicaid_spending_2026 * tax_unit_data$tax_unit_wt_2026)/1000000)
 # Apply adjustment factors
 tax_unit_data <- tax_unit_data %>%
   mutate(
@@ -243,6 +279,7 @@ tax_unit_data <- tax_unit_data %>%
 #--------------------------------------------------
 # Collapse to baseline income group, apply scenario
 #--------------------------------------------------
+# Baseline values
 summary_data <- tax_unit_data %>%
   group_by(agi_group) %>%
   dplyr::summarize(
@@ -250,10 +287,6 @@ summary_data <- tax_unit_data %>%
     medicaid_spending_2026_base = sum(medicaid_spending_2026_base * tax_unit_wt_2026)/1000000,
     total_tax_units = sum(tax_unit_wt_2026)/1000000
   )
-
-# Calculate 2026 amounts from House reconciliation instructions
-snap_cut <- (230 * (4/3)) / 1117.344
-medicaid_cut <- (880 * (4/3)) / 8410.476
 
 # Apply cuts and calculate changes
 summary_data <- summary_data %>%
@@ -283,5 +316,5 @@ summary_data <- summary_data %>%
 table_order<- c('agi_group','agi_group_label','total_tax_units',
                 'snap_spending_2026_base',  'snap_spending_2026_housebr', 'avg_chg_snap',
                 'medicaid_spending_2026_base', 'medicaid_spending_2026_housebr', 'avg_chg_medicaid')
-summary_data <- summary_data[,table_order]
-write.csv(summary_data, file = paste0(out_path,"snap_medicaid_fy2026.csv"), row.names = FALSE, na="")
+summary_data <- summary_data[, table_order]
+write.csv(summary_data, file = paste0(out_path,"snap_medicaid_cy2026.csv"), row.names = FALSE, na="")
