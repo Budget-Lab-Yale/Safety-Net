@@ -52,9 +52,9 @@ set.seed(85675443)
 # Calculate percent cuts to SNAP and Medicaid based on:
 # a. Reconciliation instructions to committees in House BR (multiplied by 4/3 to account for
 #    additional $500B in unspecified decifit reduction on top of $1.5T of specified cuts).
-# b. CBO January 2025 BEO figures (totals) for SNAP and Medicaid for FY2025-34
-snap_cut <- (230 * (4/3)) / 1117.344
-medicaid_cut <- (880 * (4/3)) / 8410.476
+# b. CBO January 2025 BEO figures (totals) for SNAP and Medicaid for FY2026-34 (assuming cuts over 9 years)
+snap_cut <- (230 * (4/3)) / 1007.709
+medicaid_cut <- (880 * (4/3)) / 7733.752
 
 # Average per-person Federal spending on Medicaid + CHIP, CY2026
 # Using June 2024 detailed baseline projections (latest available), taking weighted
