@@ -237,6 +237,7 @@ tax_unit_data <- tax_unit_data %>% mutate(
                               )
                             )
 # Assign AGI groups
+# Quintiles
 tax_unit_data <- tax_unit_data %>%
   mutate(agi_group = case_when(
     is.na(agi_pctile) ~ 0,
@@ -244,11 +245,17 @@ tax_unit_data <- tax_unit_data %>%
     agi_pctile < 400 ~ 2,
     agi_pctile < 600 ~ 3,
     agi_pctile < 800 ~ 4,
-    agi_pctile < 900 ~ 5,
-    agi_pctile < 990 ~ 6,
-    agi_pctile < 999 ~ 7,
-    agi_pctile >= 999 ~ 8
+    agi_pctile >= 800 ~ 5
     ))
+
+# Top groups
+tax_unit_data <- tax_unit_data %>%
+  mutate(
+    top10 = ifelse(agi_pctile >= 901,1,0),
+    top5 = ifelse(agi_pctile >= 951,1,0),
+    top1 = ifelse(agi_pctile >= 991,1,0),
+    top01 = ifelse(agi_pctile > 999,1,0),
+  )
 
 #-------------------------------
 # Adjustments to transfer income
@@ -280,6 +287,7 @@ tax_unit_data <- tax_unit_data %>%
 # Collapse to baseline income group, apply scenario
 #--------------------------------------------------
 # Baseline values
+#Quintiles
 summary_data <- tax_unit_data %>%
   group_by(agi_group) %>%
   dplyr::summarize(
@@ -287,6 +295,19 @@ summary_data <- tax_unit_data %>%
     medicaid_spending_2026_base = sum(medicaid_spending_2026_base * tax_unit_wt_2026)/1000000,
     total_tax_units = sum(tax_unit_wt_2026)/1000000
   )
+
+agi_grp_ctr <- 6
+for (x in c('top10','top5','top1','top01')) {
+  summary_data_top <- tax_unit_data %>% filter(get(x) == 1) %>%
+    dplyr::summarize(
+      snap_spending_2026_base = sum(snap_spending_2026_base * tax_unit_wt_2026)/1000000,
+      medicaid_spending_2026_base = sum(medicaid_spending_2026_base * tax_unit_wt_2026)/1000000,
+      total_tax_units = sum(tax_unit_wt_2026)/1000000
+    ) %>%
+    mutate(agi_group = agi_grp_ctr)
+  summary_data <- bind_rows(summary_data, summary_data_top)
+  agi_grp_ctr <- agi_grp_ctr + 1
+}
 
 # Apply cuts and calculate changes
 summary_data <- summary_data %>%
@@ -305,10 +326,11 @@ summary_data <- summary_data %>%
     agi_group == 2 ~ 'Second quintile',
     agi_group == 3 ~ 'Middle quintile',
     agi_group == 4 ~ 'Fourth quintile',
-    agi_group == 5 ~ '80% - 90%',
-    agi_group == 6 ~ '90% - 99%',
-    agi_group == 7 ~ '99% - 99.9%',
-    agi_group == 8 ~ 'Top 0.1%'
+    agi_group == 5 ~ 'Top quintile',
+    agi_group == 6 ~ 'Top 10%',
+    agi_group == 7 ~ 'Top 5%',
+    agi_group == 8 ~ 'Top 1%',
+    agi_group == 9 ~ 'Top 0.1%'
   ))
 
 
